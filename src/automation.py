@@ -3,23 +3,43 @@ Main automation workflow for Plaud.ai.
 Orchestrates: Gmail Search -> Content Extraction -> Drive Upload -> Email Archiving.
 """
 import datetime
+import re
 from src.mcp_server import gmail as gmail_mcp
 from src.mcp_server import drive as drive_mcp
 
-def format_date_time(date_str):
-    # Example date_str: "Tue, 30 Dec 2025 15:45:00 +0000"
-    # We want "YYYY-MM-DD HH:MM"
+def parse_date_and_subject(date_str, raw_subject):
+    # Base date from email date header
+    dt = datetime.datetime.now()
     try:
         dt = datetime.datetime.strptime(date_str[:25].strip(), "%a, %d %b %Y %H:%M:%S")
-        return dt.strftime("%Y-%m-%d %H:%M")
     except Exception:
-        return datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        pass
+        
+    year = dt.strftime("%Y")
+    doc_date = dt.strftime("%Y-%m-%d")
+    
+    # Check for explicit date in subject like 02-13 or 02/13
+    match = re.search(r'\b(\d{2})[-/](\d{2})\b', raw_subject)
+    if match:
+        doc_date = f"{year}-{match.group(1)}-{match.group(2)}"
+        
+    # Clean subject
+    safe_subject = re.sub(r'^(Fwd:\s*|Re:\s*)+', '', raw_subject, flags=re.IGNORECASE)
+    safe_subject = re.sub(r'\[plaud.*?\]', '', safe_subject, flags=re.IGNORECASE)
+    safe_subject = re.sub(r'\b\d{2}[-/]\d{2}\b', '', safe_subject)
+    safe_subject = re.sub(r'[\\/:*?"<>|]', '-', safe_subject)
+    safe_subject = safe_subject.strip()
+    safe_subject = re.sub(r'^[- \t]+', '', safe_subject).strip()
+    
+    if not safe_subject:
+        safe_subject = "Meeting Recording"
+        
+    return doc_date, safe_subject
 
 def main():
     print("Starting Plaud.ai Automation...")
     
     # 1. Search for emails
-    # Calling the functions from the modules directly.
     emails = gmail_mcp.search_plaud_emails()
     
     if not emails or (isinstance(emails, list) and len(emails) > 0 and isinstance(emails[0], str) and "error" in emails[0].lower()):
@@ -32,7 +52,11 @@ def main():
 
     # 2. Get/Create Drive Folder
     folder_id = drive_mcp.get_or_create_folder("Filing Cabinet/Plaud")
-    print(f"Target Drive Folder ID: {folder_id}")
+    # For transcript routing if we wanted to mirror exactly, though plaud python script keeps it simple.
+    transcript_folder_id = drive_mcp.get_or_create_folder("Filing Cabinet/Transcripts")
+    
+    print(f"Target Drive Folder ID (Plaud): {folder_id}")
+    print(f"Target Drive Folder ID (Transcripts): {transcript_folder_id}")
 
     for email in emails:
         print(f"Processing email: {email['subject']} ({email['date']})")
@@ -44,14 +68,13 @@ def main():
             print(f"Error fetching content for {email['id']}: {content['error']}")
             continue
             
-        # 4. Format Title and Filenames
-        formatted_date = format_date_time(email['date'])
-        title = f"{formatted_date} {email['subject']}"
-        markdown_filename = f"{title}.md"
+        # 4. Extract Date & Clean Subject
+        doc_date, safe_subject = parse_date_and_subject(email['date'], email['subject'])
+        markdown_filename = f"{doc_date} - {safe_subject}.md"
         
         # 5. Create Markdown Content
-        md_body = f"# {email['subject']}\n\n"
-        md_body += f"**Date:** {email['date']}\n"
+        md_body = f"# {safe_subject}\n\n"
+        md_body += f"**Date:** {doc_date}\n"
         md_body += f"**From:** PLAUD.AI\n\n"
         md_body += "---\n\n"
         md_body += content['body']
@@ -62,10 +85,17 @@ def main():
         
         # 7. Handle Attachments
         for att in content['attachments']:
-            att_filename = f"{formatted_date} {att['filename']}"
-            print(f"Uploading Attachment: {att_filename}")
+            is_transcript = 'transcript' in att['filename'].lower()
+            type_label = "Transcript" if is_transcript else "Recording"
+            
+            att_ext = att['filename'].split('.')[-1]
+            att_filename = f"{doc_date} - {safe_subject} - {type_label}.{att_ext}"
+            
+            target_folder = transcript_folder_id if is_transcript else folder_id
+            
+            print(f"Uploading Attachment: {att_filename} -> {'Transcripts' if is_transcript else 'Plaud'}")
             att_data = gmail_mcp.download_attachment(email['id'], att['attachmentId'])
-            drive_mcp.upload_binary_file(att_filename, att_data, folder_id)
+            drive_mcp.upload_binary_file(att_filename, att_data, target_folder)
             
         # 8. Archive Email
         print(f"Archiving thread: {email['threadId']}")
