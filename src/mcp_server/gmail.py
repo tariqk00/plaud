@@ -6,9 +6,6 @@ import os.path
 import base64
 from typing import Optional, List, Dict, Any
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import sys
@@ -29,7 +26,7 @@ mcp = FastMCP("Gmail")
 
 def get_gmail_service():
     auth = GoogleAuth(base_dir=repo_root)
-    creds = auth.get_credentials(token_filename='config/token.json', credentials_filename='config/credentials.json', scopes=SCOPES)
+    creds = auth.get_credentials(token_filename='token.json', credentials_filename='config/credentials.json', scopes=SCOPES)
     return build('gmail', 'v1', credentials=creds)
 
 @mcp.tool()

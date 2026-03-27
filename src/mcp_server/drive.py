@@ -5,35 +5,30 @@ Exposes tools to Create Folders and Upload Files (Text/Binary).
 import os.path
 import io
 import base64
+import sys
 from typing import Optional, List, Dict, Any
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseUpload
 
+# Ensure local toolbox package is importable if running script directly
+current_dir = os.path.dirname(os.path.abspath(__file__))
+repo_root = os.path.dirname(os.path.dirname(current_dir))
+if repo_root not in sys.path:
+    sys.path.append(repo_root)
+
+from toolbox.lib.google_api import GoogleAuth
 from mcp.server.fastmcp import FastMCP
 
 # If modifying these scopes, delete the file config/token_drive.json.
-SCOPES = ['https://www.googleapis.com/auth/drive.file', 'https://www.googleapis.com/auth/drive.metadata.readonly']
+SCOPES = ['https://www.googleapis.com/auth/drive'] # Using full drive scope for consistency with toolbox
 
 mcp = FastMCP("GoogleDrive")
 
 def get_drive_service():
-    creds = None
-    if os.path.exists('config/token_drive.json'):
-        creds = Credentials.from_authorized_user_file('config/token_drive.json', SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                'config/credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open('config/token_drive.json', 'w') as token:
-            token.write(creds.to_json())
+    auth = GoogleAuth(base_dir=repo_root)
+    creds = auth.get_credentials(token_filename='token_full_drive.json', credentials_filename='config/credentials.json', scopes=SCOPES)
     return build('drive', 'v3', credentials=creds)
 
 @mcp.tool()
