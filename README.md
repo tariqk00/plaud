@@ -10,6 +10,10 @@ This project automates the process of saving Plaud.ai summary emails and their r
 - **Drive Filing**: Places all files in the `Filing Cabinet/Plaud` directory on Google Drive (creates it if it doesn't exist).
 - **Archiving**: Automatically removes processed emails from the Gmail Inbox.
 
+> [!NOTE]
+> **Documentation Hub**: See [setup/docs/INDEX.md](../../setup/docs/INDEX.md) for master environment rules.
+> Repository rules are located in [.agent/rules.md](./.agent/rules.md).
+
 ## Structure
 
 - `gmail_mcp.py`: Gmail MCP server with tools for searching, downloading, and archiving.
