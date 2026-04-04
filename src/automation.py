@@ -3,7 +3,15 @@ Main automation workflow for Plaud.ai.
 Orchestrates: Gmail Search -> Content Extraction -> Drive Upload -> Email Archiving.
 """
 import datetime
+import os
 import re
+import sys
+
+_toolbox = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "toolbox")
+if _toolbox not in sys.path:
+    sys.path.insert(0, _toolbox)
+from lib.telegram import send_message
+
 from src.mcp_server import gmail as gmail_mcp
 from src.mcp_server import drive as drive_mcp
 
@@ -38,17 +46,20 @@ def parse_date_and_subject(date_str, raw_subject):
 
 def main():
     print("Starting Plaud.ai Automation...")
-    
+
     # 1. Search for emails
     emails = gmail_mcp.search_plaud_emails()
-    
+
     if not emails or (isinstance(emails, list) and len(emails) > 0 and isinstance(emails[0], str) and "error" in emails[0].lower()):
         print(f"Error or no emails found: {emails}")
         return
-    
+
     if not emails:
         print("No new Plaud.ai emails found.")
         return
+
+    processed = []
+    errors = []
 
     # 2. Get/Create Drive Folder
     folder_id = drive_mcp.get_or_create_folder("Filing Cabinet/Plaud")
@@ -60,12 +71,13 @@ def main():
 
     for email in emails:
         print(f"Processing email: {email['subject']} ({email['date']})")
-        
+
         # 3. Get Full Content
         content = gmail_mcp.get_email_content(email['id'])
-        
+
         if "error" in content:
             print(f"Error fetching content for {email['id']}: {content['error']}")
+            errors.append(email['subject'])
             continue
             
         # 4. Extract Date & Clean Subject
@@ -100,8 +112,15 @@ def main():
         # 8. Archive Email
         print(f"Archiving thread: {email['threadId']}")
         gmail_mcp.archive_email_thread(email['threadId'])
+        processed.append(f"  {doc_date} — {safe_subject}")
 
     print("Automation completed successfully.")
+    lines = [f"{len(processed)} recording{'s' if len(processed) != 1 else ''} processed"]
+    lines.extend(processed)
+    if errors:
+        lines.append(f"{len(errors)} error{'s' if len(errors) != 1 else ''}:")
+        lines.extend(f"  Error: {s}" for s in errors)
+    send_message("\n".join(lines), service="plaud-automation")
 
 if __name__ == "__main__":
     main()
