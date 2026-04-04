@@ -1,6 +1,8 @@
 credentials.json
 token.json
 token_drive.json
+token_*.json
+config/
 venv/
 __pycache__/
 *.pyc
