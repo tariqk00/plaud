@@ -30,7 +30,7 @@ def get_gmail_service():
     return build('gmail', 'v1', credentials=creds)
 
 @mcp.tool()
-def search_plaud_emails(query: str = 'from:PLAUD.AI <no-reply@plaud.ai> subject:[PLAUD-AutoFlow] label:INBOX is:unread') -> List[Dict[str, str]]:
+def search_plaud_emails(query: str = 'from:no-reply@plaud.ai subject:[PLAUD-AutoFlow] is:unread') -> List[Dict[str, str]]:
     """
     Search for Plaud.ai emails matching the specific criteria.
     Returns a list of email metadata (id, threadId, subject, date).
@@ -125,13 +125,14 @@ def download_attachment(message_id: str, attachment_id: str) -> str:
 @mcp.tool()
 def archive_email_thread(thread_id: str):
     """
-    Archive a specific email thread by removing the INBOX label.
+    Archive a specific email thread: remove INBOX label and mark as read.
+    Marking as read is the dedup mechanism for emails that bypass INBOX (CATEGORY_UPDATES).
     """
     service = get_gmail_service()
     try:
         service.users().threads().modify(
             userId='me', id=thread_id,
-            body={'removeLabelIds': ['INBOX']}
+            body={'removeLabelIds': ['INBOX', 'UNREAD']}
         ).execute()
         return f"Thread {thread_id} archived successfully."
     except HttpError as error:
