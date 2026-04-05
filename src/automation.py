@@ -100,7 +100,8 @@ def main():
                 print(f"Skipping non-text attachment: {att['filename']}")
                 continue
 
-            att_filename = f"{doc_date} - {safe_subject} - Transcript.md"
+            orig_stem = os.path.splitext(att['filename'])[0]
+            att_filename = f"{doc_date} - {safe_subject} - {orig_stem}.md"
             print(f"Uploading Attachment: {att_filename}")
             att_data = gmail_mcp.download_attachment(email['id'], att['attachmentId'])
             att_text = base64.urlsafe_b64decode(att_data + '==').decode('utf-8', errors='replace')
