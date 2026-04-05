@@ -2,6 +2,7 @@
 Main automation workflow for Plaud.ai.
 Orchestrates: Gmail Search -> Content Extraction -> Drive Upload -> Email Archiving.
 """
+import base64
 import datetime
 import os
 import re
@@ -62,12 +63,8 @@ def main():
     errors = []
 
     # 2. Get/Create Drive Folder
-    folder_id = drive_mcp.get_or_create_folder("Filing Cabinet/Plaud")
-    # For transcript routing if we wanted to mirror exactly, though plaud python script keeps it simple.
-    transcript_folder_id = drive_mcp.get_or_create_folder("Filing Cabinet/Transcripts")
-    
+    folder_id = drive_mcp.get_or_create_folder("01 - Second Brain/Plaud")
     print(f"Target Drive Folder ID (Plaud): {folder_id}")
-    print(f"Target Drive Folder ID (Transcripts): {transcript_folder_id}")
 
     for email in emails:
         print(f"Processing email: {email['subject']} ({email['date']})")
@@ -95,19 +92,19 @@ def main():
         print(f"Uploading Markdown: {markdown_filename}")
         drive_mcp.upload_file(markdown_filename, md_body, folder_id)
         
-        # 7. Handle Attachments
+        # 7. Handle Attachments — text/markdown only, skip audio
+        text_exts = {'.txt', '.md', '.markdown'}
         for att in content['attachments']:
-            is_transcript = 'transcript' in att['filename'].lower()
-            type_label = "Transcript" if is_transcript else "Recording"
-            
-            att_ext = att['filename'].split('.')[-1]
-            att_filename = f"{doc_date} - {safe_subject} - {type_label}.{att_ext}"
-            
-            target_folder = transcript_folder_id if is_transcript else folder_id
-            
-            print(f"Uploading Attachment: {att_filename} -> {'Transcripts' if is_transcript else 'Plaud'}")
+            att_ext = os.path.splitext(att['filename'])[1].lower()
+            if att_ext not in text_exts:
+                print(f"Skipping non-text attachment: {att['filename']}")
+                continue
+
+            att_filename = f"{doc_date} - {safe_subject} - Transcript.md"
+            print(f"Uploading Attachment: {att_filename}")
             att_data = gmail_mcp.download_attachment(email['id'], att['attachmentId'])
-            drive_mcp.upload_binary_file(att_filename, att_data, target_folder)
+            att_text = base64.urlsafe_b64decode(att_data + '==').decode('utf-8', errors='replace')
+            drive_mcp.upload_file(att_filename, att_text, folder_id)
             
         # 8. Archive Email
         print(f"Archiving thread: {email['threadId']}")
