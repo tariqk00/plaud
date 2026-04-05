@@ -1,5 +1,8 @@
 # Plaud Automation Journal
 
+## 2026-04-04
+- fix: added pagination loop to `search_plaud_emails()` in `src/mcp_server/gmail.py` — Gmail API returns max 100 results per page; without `nextPageToken` loop, emails beyond page 1 were silently skipped and left unprocessed in inbox
+
 ## 2026-03-27
 - fix: resolved undefined `repo_root` crash in `src/mcp_server/drive.py` — Drive MCP server would fail on startup
 - fix: removed unused legacy imports (`Request`, `Credentials`, `InstalledAppFlow`) from `gmail.py` and `drive.py`

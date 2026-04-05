@@ -4,6 +4,7 @@
 - [x] [Fix] Remove unused legacy imports in `gmail.py` and `drive.py`
 - [x] [Fix] Replace hardcoded absolute paths in test files with relative paths
 - [x] [Chore] Delete AI-generated n8n debug scripts (`fetch_*.py`, `analyze_gmail_payload.py`)
+- [x] [Fix] Add pagination loop to `search_plaud_emails()` — was silently dropping emails beyond page 1
 - [ ] [Config] Verify `token.json` and `credentials.json` validity
 - [ ] [Feature] Test `plaud_automation.py` with recent email samples
 - [ ] [Ops] Check systemd timer status `plaud-automation.timer`

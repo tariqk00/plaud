@@ -34,12 +34,22 @@ def search_plaud_emails(query: str = 'from:no-reply@plaud.ai subject:[PLAUD-Auto
     """
     Search for Plaud.ai emails matching the specific criteria.
     Returns a list of email metadata (id, threadId, subject, date).
+    Paginates through all results using nextPageToken so no emails are missed.
     """
     service = get_gmail_service()
     try:
-        results = service.users().messages().list(userId='me', q=query).execute()
-        messages = results.get('messages', [])
-        
+        messages = []
+        page_token = None
+        while True:
+            params = {'userId': 'me', 'q': query}
+            if page_token:
+                params['pageToken'] = page_token
+            results = service.users().messages().list(**params).execute()
+            messages.extend(results.get('messages', []))
+            page_token = results.get('nextPageToken')
+            if not page_token:
+                break
+
         email_list = []
         for msg in messages:
             msg_details = service.users().messages().get(userId='me', id=msg['id']).execute()
