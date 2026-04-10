@@ -10,6 +10,8 @@ import os
 import re
 import sys
 
+import gzip
+
 import requests
 
 # Resolve paths
@@ -82,7 +84,7 @@ def list_recordings(token: str) -> list[dict]:
     )
     resp.raise_for_status()
     data = resp.json()
-    return data.get('data', [])
+    return data.get('data_file_list', [])
 
 
 def get_detail(token: str, file_id: str) -> dict:
@@ -91,17 +93,27 @@ def get_detail(token: str, file_id: str) -> dict:
     return resp.json().get('data', {})
 
 
-def fetch_transcript(url: str) -> str:
-    """Download and parse a transaction JSON transcript into readable text."""
+def _fetch_gzipped_json(url: str):
+    """Fetch a URL that returns gzip-compressed JSON."""
     resp = requests.get(url, timeout=30)
     resp.raise_for_status()
-    segments = resp.json()
+    data = resp.content
+    try:
+        data = gzip.decompress(data)
+    except OSError:
+        pass  # not gzipped
+    return json.loads(data)
+
+
+def fetch_transcript(url: str) -> str:
+    """Download and parse a transcript JSON into readable text."""
+    segments = _fetch_gzipped_json(url)
     if not isinstance(segments, list):
         return ''
     lines = []
     for seg in segments:
-        speaker = seg.get('speaker', '').strip()
-        text = seg.get('text', '').strip()
+        speaker = (seg.get('speaker') or '').strip()
+        text = (seg.get('content') or seg.get('text') or '').strip()
         if not text:
             continue
         if speaker:
@@ -109,6 +121,17 @@ def fetch_transcript(url: str) -> str:
         else:
             lines.append(text)
     return '\n\n'.join(lines)
+
+
+def fetch_summary(url: str) -> str:
+    """Download and extract ai_content from a summary JSON."""
+    try:
+        data = _fetch_gzipped_json(url)
+        if isinstance(data, dict):
+            return data.get('ai_content', '')
+    except Exception:
+        pass
+    return ''
 
 
 # ── Filename helpers ─────────────────────────────────────────────────────────
@@ -121,6 +144,8 @@ def parse_recording(rec: dict) -> tuple[str, str]:
     if raw_time:
         try:
             if isinstance(raw_time, (int, float)):
+                if raw_time > 1e10:  # milliseconds → seconds
+                    raw_time /= 1000
                 dt = datetime.datetime.fromtimestamp(raw_time)
             else:
                 dt = datetime.datetime.fromisoformat(raw_time.replace('Z', '+00:00'))
@@ -128,7 +153,7 @@ def parse_recording(rec: dict) -> tuple[str, str]:
         except Exception:
             pass
 
-    title = rec.get('title', '') or rec.get('file_name', '') or 'Untitled Recording'
+    title = rec.get('filename', '') or rec.get('title', '') or rec.get('file_name', '') or 'Untitled Recording'
     safe = re.sub(r'[\\/:*?"<>|]', '-', title).strip()
     safe = re.sub(r'\s+', ' ', safe).strip()
     if not safe:
@@ -146,8 +171,26 @@ def build_markdown(rec: dict, detail: dict, doc_date: str, safe_subject: str) ->
     lines.append('---')
     lines.append('')
 
-    # AI summary / meeting minutes from detail
-    ai_content = detail.get('ai_content', '') or ''
+    # AI summary from auto_sum_note content item
+    ai_content = ''
+    transcript_text = ''
+    for item in detail.get('content_list', []):
+        dtype = item.get('data_type', '')
+        link = item.get('data_link', '')
+        status = item.get('task_status')
+        if not link or status in (None, 0):
+            continue
+        if dtype == 'auto_sum_note' and not ai_content:
+            try:
+                ai_content = fetch_summary(link)
+            except Exception as e:
+                logger.warning(f'Summary fetch failed for {rec.get("id")}: {e}')
+        elif dtype == 'transaction' and not transcript_text:
+            try:
+                transcript_text = fetch_transcript(link)
+            except Exception as e:
+                logger.warning(f'Transcript fetch failed for {rec.get("id")}: {e}')
+
     if ai_content:
         lines.append('## Summary')
         lines.append('')
@@ -155,18 +198,6 @@ def build_markdown(rec: dict, detail: dict, doc_date: str, safe_subject: str) ->
         lines.append('')
         lines.append('---')
         lines.append('')
-
-    # Transcript
-    transcript_text = ''
-    for item in detail.get('content_list', []):
-        if item.get('data_type') == 'transaction':
-            link = item.get('data_link', '')
-            if link and item.get('task_status') in ('done', 'completed', 3, '3'):
-                try:
-                    transcript_text = fetch_transcript(link)
-                except Exception as e:
-                    logger.warning(f'Transcript fetch failed for {rec.get("file_id")}: {e}')
-            break
 
     if transcript_text:
         lines.append('## Transcript')
