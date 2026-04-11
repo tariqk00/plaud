@@ -216,30 +216,22 @@ def main():
     token = load_token()
     state = load_state()
     processed_ids: set[str] = set(state.get('processed_ids', []))
-    last_run = state.get('last_run')
-
-    # Parse last_run cutoff
-    cutoff = None
-    if last_run:
-        try:
-            cutoff = datetime.date.fromisoformat(last_run[:10])
-        except Exception:
-            pass
 
     recordings = list_recordings(token)
     logger.info(f'Found {len(recordings)} total recordings')
 
-    # Filter: not already processed, and (no cutoff or date >= cutoff - 1 day buffer)
+    # Filter: skip already-processed and untitled recordings.
+    # Untitled recordings are still being processed by Plaud; they'll be
+    # picked up on a future run once they have a title.
     to_process = []
     for rec in recordings:
         fid = rec.get('file_id') or rec.get('id', '')
         if fid in processed_ids:
             continue
+        raw_title = rec.get('filename', '') or rec.get('title', '') or rec.get('file_name', '')
+        if not raw_title:
+            continue
         doc_date, safe_subject = parse_recording(rec)
-        if cutoff:
-            rec_date = datetime.date.fromisoformat(doc_date)
-            if rec_date < cutoff - datetime.timedelta(days=1):
-                continue
         to_process.append((fid, rec, doc_date, safe_subject))
 
     logger.info(f'{len(to_process)} new recordings to process')
@@ -263,15 +255,15 @@ def main():
             filename = f'{doc_date} - {safe_subject}.md'
             drive_mcp.upload_file(filename, md, folder_id)
             processed_ids.add(fid)
+            # Save state after each upload so a SIGTERM can't lose progress
+            state['processed_ids'] = list(processed_ids)
+            state['last_run'] = datetime.date.today().isoformat()
+            save_state(state)
             done.append(f'  {doc_date} — {safe_subject}')
             logger.info(f'Uploaded: {filename}')
         except Exception as e:
             logger.error(f'Failed {fid}: {e}')
             errors.append(f'  {safe_subject}: {e}')
-
-    state['processed_ids'] = list(processed_ids)
-    state['last_run'] = datetime.date.today().isoformat()
-    save_state(state)
 
     lines = [f'Plaud Direct: {len(done)} recording{"s" if len(done) != 1 else ""} uploaded']
     lines.extend(done)
