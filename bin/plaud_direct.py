@@ -25,7 +25,7 @@ for p in (PLAUD_ROOT, PARENT_DIR):
         sys.path.insert(0, p)
 
 from src.mcp_server import drive as drive_mcp
-from toolbox.lib.telegram import send_message
+from toolbox.lib.telegram import send_message, escape
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger('PlaudDirect')
@@ -265,11 +265,11 @@ def main():
             logger.error(f'Failed {fid}: {e}')
             errors.append(f'  {safe_subject}: {e}')
 
-    lines = [f'Plaud Direct: {len(done)} recording{"s" if len(done) != 1 else ""} uploaded']
-    lines.extend(done)
+    lines = [f'<b>Plaud Direct: {len(done)} recording{"s" if len(done) != 1 else ""} uploaded</b>']
+    lines.extend(escape(d) for d in done)
     if errors:
         lines.append(f'{len(errors)} error{"s" if len(errors) != 1 else ""}:')
-        lines.extend(errors)
+        lines.extend(escape(e) for e in errors)
     send_message('\n'.join(lines), service='plaud-direct')
     logger.info('Done')
 
