@@ -1,7 +1,7 @@
 """
 Plaud direct API integration.
-Runs in parallel with plaud-automation (Gmail-based) during validation period.
 Fetches recordings from api.plaud.ai, uploads markdown to Drive.
+Replaces plaud-automation (Gmail-based pipeline).
 """
 import datetime
 import json
@@ -134,6 +134,17 @@ def fetch_summary(url: str) -> str:
     return ''
 
 
+def fetch_outline(url: str) -> str:
+    """Download and parse an outline JSON into a topic bullet list."""
+    try:
+        items = _fetch_gzipped_json(url)
+        if isinstance(items, list):
+            return '\n'.join(f'- {item["topic"]}' for item in items if item.get('topic'))
+    except Exception:
+        pass
+    return ''
+
+
 # ── Filename helpers ─────────────────────────────────────────────────────────
 
 def parse_recording(rec: dict) -> tuple[str, str]:
@@ -171,30 +182,65 @@ def build_markdown(rec: dict, detail: dict, doc_date: str, safe_subject: str) ->
     lines.append('---')
     lines.append('')
 
-    # AI summary from auto_sum_note content item
-    ai_content = ''
+    # Collect content by type, preserving order of sum_multi_note entries
+    outline_text = ''
+    primary_summary = ''
+    multi_summaries = []   # list of (tab_name, content)
     transcript_text = ''
+
+    fid = rec.get('file_id') or rec.get('id', '')
     for item in detail.get('content_list', []):
         dtype = item.get('data_type', '')
         link = item.get('data_link', '')
         status = item.get('task_status')
         if not link or status in (None, 0):
             continue
-        if dtype == 'auto_sum_note' and not ai_content:
+        if dtype == 'outline' and not outline_text:
             try:
-                ai_content = fetch_summary(link)
+                outline_text = fetch_outline(link)
             except Exception as e:
-                logger.warning(f'Summary fetch failed for {rec.get("id")}: {e}')
+                logger.warning(f'Outline fetch failed for {fid}: {e}')
+        elif dtype == 'auto_sum_note' and not primary_summary:
+            try:
+                primary_summary = fetch_summary(link)
+            except Exception as e:
+                logger.warning(f'Summary fetch failed for {fid}: {e}')
+        elif dtype == 'sum_multi_note':
+            tab_name = item.get('data_tab_name') or 'Summary'
+            try:
+                content = fetch_summary(link)
+                if content:
+                    multi_summaries.append((tab_name, content))
+            except Exception as e:
+                logger.warning(f'Multi-summary ({tab_name}) fetch failed for {fid}: {e}')
         elif dtype == 'transaction' and not transcript_text:
             try:
                 transcript_text = fetch_transcript(link)
             except Exception as e:
-                logger.warning(f'Transcript fetch failed for {rec.get("id")}: {e}')
+                logger.warning(f'Transcript fetch failed for {fid}: {e}')
+        # transaction_polish skipped — redundant with transcript
 
-    if ai_content:
+    # Render sections: Outline → Summary → multi-summaries → Transcript
+    if outline_text:
+        lines.append('## Outline')
+        lines.append('')
+        lines.append(outline_text)
+        lines.append('')
+        lines.append('---')
+        lines.append('')
+
+    if primary_summary:
         lines.append('## Summary')
         lines.append('')
-        lines.append(ai_content.strip())
+        lines.append(primary_summary.strip())
+        lines.append('')
+        lines.append('---')
+        lines.append('')
+
+    for tab_name, content in multi_summaries:
+        lines.append(f'## {tab_name}')
+        lines.append('')
+        lines.append(content.strip())
         lines.append('')
         lines.append('---')
         lines.append('')
