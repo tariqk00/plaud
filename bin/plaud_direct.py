@@ -128,11 +128,18 @@ def fetch_transcript(url: str) -> str:
 
 
 def fetch_summary(url: str) -> str:
-    """Download and extract ai_content from a summary JSON."""
+    """Download and extract ai_content from a summary JSON.
+    Strips embedded image tags (AWS S3 URLs) and leading H1 (repeats title).
+    """
     try:
         data = _fetch_gzipped_json(url)
         if isinstance(data, dict):
-            return data.get('ai_content', '')
+            content = data.get('ai_content', '')
+            # Strip image tags — S3 signed URLs are huge and not useful in Drive
+            content = re.sub(r'!\[.*?\]\(.*?\)', '', content)
+            # Strip leading H1 — we already have the title as the document H1
+            content = re.sub(r'^#[^\n]*\n', '', content.lstrip())
+            return content.strip()
     except Exception:
         pass
     return ''
