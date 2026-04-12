@@ -42,6 +42,10 @@ DETAIL_URL = f'{API_BASE}/file/detail'
 # Drive target
 DRIVE_FOLDER = '01 - Second Brain/Plaud'
 
+# Max characters for the title portion of a Drive filename, keeping the
+# full "YYYY-MM-DD - <title>.md" pattern visible in Drive list view.
+MAX_SUBJECT_LEN = 80
+
 
 # ── State management ─────────────────────────────────────────────────────────
 
@@ -145,6 +149,35 @@ def fetch_outline(url: str) -> str:
     return ''
 
 
+def _is_non_english(text: str) -> bool:
+    """Return True if the text contains non-ASCII characters (likely non-English)."""
+    return bool(text) and any(ord(c) > 127 for c in text)
+
+
+def translate_to_english(text: str) -> str:
+    """Translate text to English using qwen2.5:14b if it appears non-English.
+    Returns original text unchanged if already English or on failure.
+    """
+    if not _is_non_english(text):
+        return text
+    try:
+        payload = {
+            'model': 'qwen2.5:14b',
+            'prompt': (
+                'Translate the following text to English. '
+                'Output only the translated text, no explanations or preamble:\n\n'
+                + text
+            ),
+            'stream': False,
+        }
+        resp = requests.post('http://localhost:11434/api/generate', json=payload, timeout=300)
+        resp.raise_for_status()
+        return resp.json().get('response', text).strip()
+    except Exception as e:
+        logger.warning(f'Translation failed: {e}')
+        return text
+
+
 # ── Filename helpers ─────────────────────────────────────────────────────────
 
 def parse_recording(rec: dict) -> tuple[str, str]:
@@ -197,18 +230,18 @@ def build_markdown(rec: dict, detail: dict, doc_date: str, safe_subject: str) ->
             continue
         if dtype == 'outline' and not outline_text:
             try:
-                outline_text = fetch_outline(link)
+                outline_text = translate_to_english(fetch_outline(link))
             except Exception as e:
                 logger.warning(f'Outline fetch failed for {fid}: {e}')
         elif dtype == 'auto_sum_note' and not primary_summary:
             try:
-                primary_summary = fetch_summary(link)
+                primary_summary = translate_to_english(fetch_summary(link))
             except Exception as e:
                 logger.warning(f'Summary fetch failed for {fid}: {e}')
         elif dtype == 'sum_multi_note':
-            tab_name = item.get('data_tab_name') or 'Summary'
+            tab_name = translate_to_english(item.get('data_tab_name') or 'Summary')
             try:
-                content = fetch_summary(link)
+                content = translate_to_english(fetch_summary(link))
                 if content:
                     multi_summaries.append((tab_name, content))
             except Exception as e:
@@ -278,6 +311,9 @@ def main():
         if not raw_title:
             continue
         doc_date, safe_subject = parse_recording(rec)
+        safe_subject = translate_to_english(safe_subject)
+        if len(safe_subject) > MAX_SUBJECT_LEN:
+            safe_subject = safe_subject[:MAX_SUBJECT_LEN].rstrip() + '…'
         to_process.append((fid, rec, doc_date, safe_subject))
 
     logger.info(f'{len(to_process)} new recordings to process')
