@@ -25,7 +25,7 @@ for p in (PLAUD_ROOT, PARENT_DIR):
         sys.path.insert(0, p)
 
 from src.mcp_server import drive as drive_mcp
-from toolbox.lib.telegram import send_message, escape
+from toolbox.lib.telegram import send_message, escape, drive_folder_link, monit_link
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger('PlaudDirect')
@@ -325,11 +325,12 @@ def main():
             logger.error(f'Failed {fid}: {e}')
             errors.append(f'  {safe_subject}: {e}')
 
-    lines = [f'<b>Plaud Direct: {len(done)} recording{"s" if len(done) != 1 else ""} uploaded</b>']
+    lines = [f'<b>Plaud Direct: {len(done)} recording{"s" if len(done) != 1 else ""} uploaded</b>  {drive_folder_link(folder_id, "Open folder")}']
     lines.extend(escape(d) for d in done)
     if errors:
-        lines.append(f'{len(errors)} error{"s" if len(errors) != 1 else ""}:')
+        lines.append(f'\n<b>{len(errors)} error{"s" if len(errors) != 1 else ""}:</b>')
         lines.extend(escape(e) for e in errors)
+        lines.append(f'  {monit_link("Check Monit")} · <code>journalctl --user -u plaud-direct -n 50</code>')
     send_message('\n'.join(lines), service='plaud-direct')
     logger.info('Done')
 
