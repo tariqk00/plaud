@@ -12,7 +12,6 @@ _toolbox = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.
 if _toolbox not in sys.path:
     sys.path.insert(0, _toolbox)
 from lib.telegram import send_message
-from lib import ai_engine
 
 from src.mcp_server import gmail as gmail_mcp
 from src.mcp_server import drive as drive_mcp
@@ -112,21 +111,6 @@ def main():
         print(f"Archiving thread: {email['threadId']}")
         gmail_mcp.archive_email_thread(email['threadId'])
         
-        # 9. Shadow AI (Parallel Comparison)
-        if 'transcript' in email['subject'].lower() or any('transcript' in att['filename'].lower() for att in content['attachments']):
-            print(f"  [Shadow] Running parallel summary for {safe_subject}...")
-            # Use the body as context for summary
-            summary_prompt = "Summarize the following meeting transcript in 3 concise bullet points."
-            gemma_summary, gemma_dur = ai_engine.call_ollama(summary_prompt, content['body'].encode(), 'text/plain')
-            
-            # Send Telegram shadow notification
-            shadow_msg = (
-                f"🎙 *Plaud Shadow Summary*\n"
-                f"📄 `{safe_subject}`\n\n"
-                f"🔸 *Gemma 2B:* \n{gemma_summary}\n\n"
-                f"⏱ Latency: {round(gemma_dur, 1)}s"
-            )
-            send_message(shadow_msg, service="shadow-ai", parse_mode="Markdown")
         processed.append(f"  {doc_date} — {safe_subject}")
 
     print("Automation completed successfully.")
