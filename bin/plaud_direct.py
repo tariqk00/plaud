@@ -46,6 +46,34 @@ DRIVE_FOLDER = '01 - Second Brain/Plaud'
 # full "YYYY-MM-DD - <title>.md" pattern visible in Drive list view.
 MAX_SUBJECT_LEN = 80
 
+TASKS_LIST_NAME = 'Plaud'
+
+EXTRACT_PROMPT = """\
+You are extracting actionables from a voice recording.
+
+Recording: {title}
+Date: {date_str}
+
+Outline:
+{outline}
+
+Summary:
+{summary}
+
+Return ONLY valid JSON, no other text:
+{{
+  "action_items": [{{"text": "...", "due_date": "YYYY-MM-DD or null", "context": "..."}}],
+  "decisions": ["..."]
+}}
+
+Rules:
+- action_items: concrete tasks with a clear owner or commitment (explicit follow-ups, things to do)
+- decisions: key conclusions or choices made during the recording
+- due_date: parse if explicitly mentioned (e.g. "by Friday" → date), null otherwise
+- context: one sentence explaining the task, or null
+- Return empty arrays if nothing actionable is found
+"""
+
 
 # ── State management ─────────────────────────────────────────────────────────
 
@@ -156,7 +184,6 @@ def fetch_outline(url: str) -> str:
     return ''
 
 
-
 # ── Filename helpers ─────────────────────────────────────────────────────────
 
 def parse_recording(rec: dict) -> tuple[str, str]:
@@ -184,23 +211,15 @@ def parse_recording(rec: dict) -> tuple[str, str]:
     return doc_date, safe
 
 
-# ── Markdown builder ─────────────────────────────────────────────────────────
+# ── Content fetcher ───────────────────────────────────────────────────────────
 
-def build_markdown(rec: dict, detail: dict, doc_date: str, safe_subject: str) -> str:
-    lines = [f'# {safe_subject}', '']
-    lines.append(f'**Date:** {doc_date}')
-    lines.append(f'**Source:** Plaud Direct API')
-    lines.append('')
-    lines.append('---')
-    lines.append('')
-
-    # Collect content by type, preserving order of sum_multi_note entries
+def fetch_content(detail: dict, fid: str) -> dict:
+    """Fetch all content types for a recording. Returns dict with all sections."""
     outline_text = ''
     primary_summary = ''
-    multi_summaries = []   # list of (tab_name, content)
+    multi_summaries = []
     transcript_text = ''
 
-    fid = rec.get('file_id') or rec.get('id', '')
     for item in detail.get('content_list', []):
         dtype = item.get('data_type', '')
         link = item.get('data_link', '')
@@ -232,39 +251,137 @@ def build_markdown(rec: dict, detail: dict, doc_date: str, safe_subject: str) ->
                 logger.warning(f'Transcript fetch failed for {fid}: {e}')
         # transaction_polish skipped — redundant with transcript
 
-    # Render sections: Outline → Summary → multi-summaries → Transcript
-    if outline_text:
+    return {
+        'outline': outline_text,
+        'summary': primary_summary,
+        'multi_summaries': multi_summaries,
+        'transcript': transcript_text,
+    }
+
+
+# ── Markdown builder ─────────────────────────────────────────────────────────
+
+def build_markdown(rec: dict, content: dict, doc_date: str, safe_subject: str) -> str:
+    lines = [f'# {safe_subject}', '']
+    lines.append(f'**Date:** {doc_date}')
+    lines.append(f'**Source:** Plaud Direct API')
+    lines.append('')
+    lines.append('---')
+    lines.append('')
+
+    if content['outline']:
         lines.append('## Outline')
         lines.append('')
-        lines.append(outline_text)
+        lines.append(content['outline'])
         lines.append('')
         lines.append('---')
         lines.append('')
 
-    if primary_summary:
+    if content['summary']:
         lines.append('## Summary')
         lines.append('')
-        lines.append(primary_summary.strip())
+        lines.append(content['summary'].strip())
         lines.append('')
         lines.append('---')
         lines.append('')
 
-    for tab_name, content in multi_summaries:
+    for tab_name, tab_content in content['multi_summaries']:
         lines.append(f'## {tab_name}')
         lines.append('')
-        lines.append(content.strip())
+        lines.append(tab_content.strip())
         lines.append('')
         lines.append('---')
         lines.append('')
 
-    if transcript_text:
+    if content['transcript']:
         lines.append('## Transcript')
         lines.append('')
-        lines.append(transcript_text)
+        lines.append(content['transcript'])
     else:
         lines.append('*(transcript not available)*')
 
     return '\n'.join(lines)
+
+
+# ── Action item extraction ────────────────────────────────────────────────────
+
+def extract_actionables(title: str, date_str: str, content: dict) -> dict:
+    """
+    Run Groq extraction on outline + summary.
+    Returns {'action_items': [{text, due_date, context}], 'decisions': [str]}.
+    Falls back to empty on any error — never blocks upload.
+    """
+    outline = content.get('outline', '')
+    summary = content.get('summary', '')
+    if not outline and not summary:
+        return {'action_items': [], 'decisions': []}
+
+    try:
+        from toolbox.lib.llm import call_json
+        prompt = EXTRACT_PROMPT.format(
+            title=title,
+            date_str=date_str,
+            outline=outline or '(none)',
+            summary=summary[:3000] if summary else '(none)',
+        )
+        result = call_json(prompt)
+        if not isinstance(result, dict):
+            return {'action_items': [], 'decisions': []}
+        action_items = [
+            a for a in result.get('action_items', [])
+            if isinstance(a, dict) and a.get('text')
+        ]
+        decisions = [d for d in result.get('decisions', []) if isinstance(d, str) and d]
+        return {'action_items': action_items, 'decisions': decisions}
+    except Exception as e:
+        logger.warning(f'Actionable extraction failed for "{title}": {e}')
+        return {'action_items': [], 'decisions': []}
+
+
+# ── Google Tasks push ─────────────────────────────────────────────────────────
+
+def _existing_plaud_task_titles(service, list_id: str) -> set:
+    """Return normalised titles of all open tasks in the Plaud list."""
+    try:
+        result = service.tasks().list(
+            tasklist=list_id, showCompleted=False, maxResults=100,
+        ).execute()
+        return {t.get('title', '').strip().lower() for t in result.get('items', [])}
+    except Exception as e:
+        logger.warning(f'Could not fetch existing Plaud tasks for dedup: {e}')
+        return set()
+
+
+def push_plaud_tasks(items: list, title: str, date_str: str) -> int:
+    """Push action items to Google Tasks 'Plaud' list. Returns count created."""
+    if not items:
+        return 0
+    try:
+        from toolbox.lib.tasks import get_tasks_service, get_or_create_list, create_task
+        service = get_tasks_service()
+        list_id = get_or_create_list(service, TASKS_LIST_NAME)
+        existing = _existing_plaud_task_titles(service, list_id)
+        created = 0
+        for item in items:
+            task_text = item.get('text', '').strip()
+            if not task_text or task_text.lower() in existing:
+                logger.debug(f'Skipping duplicate Plaud task: {task_text[:60]}')
+                continue
+            notes_parts = []
+            if item.get('context'):
+                notes_parts.append(item['context'].strip())
+            notes_parts.append(f'From: {title} ({date_str})')
+            create_task(
+                service, list_id, task_text,
+                due=item.get('due_date') or None,
+                notes='\n'.join(notes_parts),
+            )
+            existing.add(task_text.lower())
+            created += 1
+        return created
+    except Exception as e:
+        logger.error(f'Plaud Tasks push failed: {e}')
+        return 0
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -304,14 +421,15 @@ def main():
     folder_id = drive_mcp.get_or_create_folder(DRIVE_FOLDER)
     logger.info(f'Drive folder: {folder_id}')
 
-    done = []
+    done = []   # list of (doc_date, safe_subject, actionables, tasks_created)
     errors = []
 
     for fid, rec, doc_date, safe_subject in to_process:
         logger.info(f'Processing: {doc_date} — {safe_subject} ({fid})')
         try:
             detail = get_detail(token, fid)
-            md = build_markdown(rec, detail, doc_date, safe_subject)
+            content = fetch_content(detail, fid)
+            md = build_markdown(rec, content, doc_date, safe_subject)
             filename = f'{doc_date} - {safe_subject}.md'
             drive_mcp.upload_file(filename, md, folder_id)
             processed_ids.add(fid)
@@ -319,18 +437,43 @@ def main():
             state['processed_ids'] = list(processed_ids)
             state['last_run'] = datetime.date.today().isoformat()
             save_state(state)
-            done.append(f'  {doc_date} — {safe_subject}')
             logger.info(f'Uploaded: {filename}')
+
+            actionables = extract_actionables(safe_subject, doc_date, content)
+            tasks_created = push_plaud_tasks(
+                actionables.get('action_items', []), safe_subject, doc_date,
+            )
+            if tasks_created:
+                logger.info(f'Created {tasks_created} task(s) from: {safe_subject}')
+
+            done.append((doc_date, safe_subject, actionables, tasks_created))
         except Exception as e:
             logger.error(f'Failed {fid}: {e}')
             errors.append(f'  {safe_subject}: {e}')
 
-    lines = [f'<b>Plaud Direct: {len(done)} recording{"s" if len(done) != 1 else ""} uploaded</b>  {drive_folder_link(folder_id, "Open folder")}']
-    lines.extend(escape(d) for d in done)
+    # Build Telegram message
+    total_tasks = sum(t for _, _, _, t in done)
+    header = f'<b>Plaud Direct: {len(done)} recording{"s" if len(done) != 1 else ""} uploaded'
+    if total_tasks:
+        header += f', {total_tasks} task{"s" if total_tasks != 1 else ""} created'
+    header += f'</b>  {drive_folder_link(folder_id, "Open folder")}'
+
+    lines = [header]
+    for doc_date, safe_subject, actionables, tasks_created in done:
+        action_items = actionables.get('action_items', [])
+        task_label = f' ({tasks_created} task{"s" if tasks_created != 1 else ""})' if tasks_created else ''
+        lines.append(escape(f'  {doc_date} — {safe_subject}{task_label}'))
+        for item in action_items:
+            due = f' [due: {item["due_date"]}]' if item.get('due_date') else ''
+            lines.append(escape(f'    → {item["text"]}{due}'))
+        if not action_items:
+            lines.append('    <i>(no actionables)</i>')
+
     if errors:
         lines.append(f'\n<b>{len(errors)} error{"s" if len(errors) != 1 else ""}:</b>')
         lines.extend(escape(e) for e in errors)
         lines.append(f'  {monit_link("Check Monit")} · <code>journalctl --user -u plaud-direct -n 50</code>')
+
     send_message('\n'.join(lines), service='plaud-direct')
     logger.info('Done')
 
