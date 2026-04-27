@@ -340,45 +340,31 @@ def extract_actionables(title: str, date_str: str, content: dict) -> dict:
 
 # ── Google Tasks push ─────────────────────────────────────────────────────────
 
-def _existing_plaud_task_titles(service, list_id: str) -> set:
-    """Return normalised titles of all open tasks in the Plaud list."""
-    try:
-        result = service.tasks().list(
-            tasklist=list_id, showCompleted=False, maxResults=100,
-        ).execute()
-        return {t.get('title', '').strip().lower() for t in result.get('items', [])}
-    except Exception as e:
-        logger.warning(f'Could not fetch existing Plaud tasks for dedup: {e}')
-        return set()
-
-
 def push_plaud_tasks(items: list, title: str, date_str: str) -> int:
     """Push action items to Google Tasks 'Plaud' list. Returns count created."""
     if not items:
         return 0
     try:
-        from toolbox.lib.tasks import get_tasks_service, get_or_create_list, create_task
+        from toolbox.lib.tasks import get_tasks_service, get_or_create_list
+        from toolbox.lib.task_utils import create_unique_tasks
         service = get_tasks_service()
         list_id = get_or_create_list(service, TASKS_LIST_NAME)
-        existing = _existing_plaud_task_titles(service, list_id)
-        created = 0
-        for item in items:
-            task_text = item.get('text', '').strip()
-            if not task_text or task_text.lower() in existing:
-                logger.debug(f'Skipping duplicate Plaud task: {task_text[:60]}')
-                continue
+
+        def notes_for(item: dict) -> str:
             notes_parts = []
             if item.get('context'):
                 notes_parts.append(item['context'].strip())
             notes_parts.append(f'From: {title} ({date_str})')
-            create_task(
-                service, list_id, task_text,
-                due=item.get('due_date') or None,
-                notes='\n'.join(notes_parts),
-            )
-            existing.add(task_text.lower())
-            created += 1
-        return created
+            return '\n'.join(notes_parts)
+
+        return create_unique_tasks(
+            service,
+            list_id,
+            items,
+            title_fn=lambda item: item.get('text', '').strip(),
+            due_fn=lambda item: item.get('due_date') or None,
+            notes_fn=notes_for,
+        )
     except Exception as e:
         logger.error(f'Plaud Tasks push failed: {e}')
         return 0
