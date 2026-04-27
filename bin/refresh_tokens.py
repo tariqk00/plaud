@@ -17,9 +17,9 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 
 def refresh_gmail():
     SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.modify']
-    print("\n--- Refreshing GMAIL Token (config/token.json) ---")
-    if os.path.exists('config/token.json'):
-        # print("Removing old config/token.json...")
+    print("\n--- Refreshing GMAIL Token (config/token_gmail_plaud.json) ---")
+    if os.path.exists('config/token_gmail_plaud.json'):
+        # print("Removing old config/token_gmail_plaud.json...")
         pass 
     
     flow = InstalledAppFlow.from_client_secrets_file('config/credentials.json', SCOPES)
@@ -34,15 +34,15 @@ def refresh_gmail():
     flow.fetch_token(code=code)
     creds = flow.credentials
     
-    with open('config/token.json', 'w') as token:
+    with open('config/token_gmail_plaud.json', 'w') as token:
         token.write(creds.to_json())
-    print("Successfully saved config/token.json")
+    print("Successfully saved config/token_gmail_plaud.json")
 
 def refresh_drive():
     SCOPES = ['https://www.googleapis.com/auth/drive.file', 'https://www.googleapis.com/auth/drive.metadata.readonly']
-    print("\n--- Refreshing DRIVE Token (config/token_drive.json) ---")
-    if os.path.exists('config/token_drive.json'):
-        # print("Removing old config/token_drive.json...")
+    print("\n--- Refreshing DRIVE Token (config/token_drive_sorter.json) ---")
+    if os.path.exists('config/token_drive_sorter.json'):
+        # print("Removing old config/token_drive_sorter.json...")
         pass
         
     flow = InstalledAppFlow.from_client_secrets_file('config/credentials.json', SCOPES)
@@ -57,9 +57,9 @@ def refresh_drive():
     flow.fetch_token(code=code)
     creds = flow.credentials
     
-    with open('config/token_drive.json', 'w') as token:
+    with open('config/token_drive_sorter.json', 'w') as token:
         token.write(creds.to_json())
-    print("Successfully saved config/token_drive.json")
+    print("Successfully saved config/token_drive_sorter.json")
 
 if __name__ == "__main__":
     print("Please ensure config/credentials.json is present.")
