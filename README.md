@@ -1,4 +1,9 @@
-# Plaud.ai to Google Drive Automation
+# Plaud.ai to Google Drive Automation (DEPRECATED)
+
+> [!WARNING]
+> **DEPRECATED**: This standalone repository is deprecated. All functionality has been migrated to the [toolbox/services/email_extractor](../../toolbox/services/email_extractor) service in the `toolbox` repository.
+>
+> Please use the unified `email-extractor` service going forward.
 
 Automates processing of Plaud.ai recording emails — saves summaries and attachments to Google Drive and archives the emails from Gmail.
 
