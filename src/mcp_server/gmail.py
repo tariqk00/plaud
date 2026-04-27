@@ -25,8 +25,9 @@ SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googlea
 mcp = FastMCP("Gmail")
 
 def get_gmail_service():
-    auth = GoogleAuth(base_dir=repo_root)
-    creds = auth.get_credentials(token_filename='token.json', credentials_filename='config/credentials.json', scopes=SCOPES)
+    toolbox_root = os.path.join(os.path.dirname(repo_root), 'toolbox')
+    auth = GoogleAuth(base_dir=toolbox_root)
+    creds = auth.get_credentials(token_filename='token_gmail_plaud.json', scopes=SCOPES)
     return build('gmail', 'v1', credentials=creds)
 
 @mcp.tool()

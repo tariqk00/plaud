@@ -27,8 +27,9 @@ SCOPES = ['https://www.googleapis.com/auth/drive'] # Using full drive scope for 
 mcp = FastMCP("GoogleDrive")
 
 def get_drive_service():
-    auth = GoogleAuth(base_dir=None)
-    creds = auth.get_credentials(token_filename='token_full_drive.json', credentials_filename='config/credentials.json', scopes=SCOPES)
+    toolbox_root = os.path.join(os.path.dirname(repo_root), 'toolbox')
+    auth = GoogleAuth(base_dir=toolbox_root)
+    creds = auth.get_credentials(token_filename='token_drive_sorter.json', scopes=SCOPES)
     return build('drive', 'v3', credentials=creds)
 
 @mcp.tool()
