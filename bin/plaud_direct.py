@@ -317,14 +317,15 @@ def extract_actionables(title: str, date_str: str, content: dict) -> dict:
         return {'action_items': [], 'decisions': []}
 
     try:
-        from toolbox.lib.llm import call_json
+        from toolbox.lib.llm_gateway import call_llm, _parse_json
         prompt = EXTRACT_PROMPT.format(
             title=title,
             date_str=date_str,
             outline=outline or '(none)',
             summary=summary[:3000] if summary else '(none)',
         )
-        result = call_json(prompt)
+        res = call_llm(task_type='automation', prompt=prompt)
+        result = _parse_json(res.get('text', ''))
         if not isinstance(result, dict):
             return {'action_items': [], 'decisions': []}
         action_items = [
