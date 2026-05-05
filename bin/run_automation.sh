@@ -26,9 +26,11 @@ fi
 PARENT_DIR="$(dirname "$REPO_ROOT")"
 export PYTHONPATH="$REPO_ROOT:$PARENT_DIR:$PYTHONPATH"
 
-# Detect Python Executable (prefer local venv)
+# Detect Python Executable (prefer local venv, then shared toolbox runtime).
 if [ -f "$REPO_ROOT/venv/bin/python3" ]; then
     PYTHON_EXEC="$REPO_ROOT/venv/bin/python3"
+elif [ -f "$TOOLBOX_DIR/venv/bin/python3" ]; then
+    PYTHON_EXEC="$TOOLBOX_DIR/venv/bin/python3"
 elif [ -f "$TOOLBOX_DIR/google-drive/venv/bin/python3" ]; then
     PYTHON_EXEC="$TOOLBOX_DIR/google-drive/venv/bin/python3"
 else
